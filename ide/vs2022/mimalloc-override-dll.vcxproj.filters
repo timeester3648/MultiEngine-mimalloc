@@ -25,6 +25,9 @@
     <ClCompile Include="..\..\src\init.c">
       <Filter>Sources</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\libc.c">
+      <Filter>Sources</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\options.c">
       <Filter>Sources</Filter>
     </ClCompile>
@@ -55,21 +58,15 @@
     <ClCompile Include="..\..\src\stats.c">
       <Filter>Sources</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\libc.c">
-      <Filter>Sources</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\free.c">
-      <Filter>Sources</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\arena-abandoned.c">
+    <ClCompile Include="..\..\src\arena-abandon.c">
       <Filter>Sources</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\src\bitmap.h">
+    <ClInclude Include="..\..\include\mimalloc\atomic.h">
       <Filter>Headers</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\mimalloc\atomic.h">
+    <ClInclude Include="..\..\src\bitmap.h">
       <Filter>Headers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\mimalloc\internal.h">
@@ -78,10 +75,16 @@
     <ClInclude Include="$(ProjectDir)..\..\include\mimalloc.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\mimalloc-etw.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\mimalloc-etw-gen.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\mimalloc-new-delete.h">
       <Filter>Headers</Filter>
     </ClInclude>
-    <ClInclude Include="$(ProjectDir)..\..\include\mimalloc-override.h">
+    <ClInclude Include="..\..\include\mimalloc-override.h">
       <Filter>Headers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\mimalloc\track.h">
@@ -93,13 +96,16 @@
     <ClInclude Include="..\..\include\mimalloc\prim.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\mimalloc-stats.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Headers">
-      <UniqueIdentifier>{dd2da697-c33c-4348-bf80-a802ebaa06fb}</UniqueIdentifier>
+      <UniqueIdentifier>{262c6c21-e270-4ba6-bd63-4ac999307e4e}</UniqueIdentifier>
     </Filter>
     <Filter Include="Sources">
-      <UniqueIdentifier>{8027057b-4b93-4321-b93c-d51dd0c8077b}</UniqueIdentifier>
+      <UniqueIdentifier>{94b40bdc-a741-45dd-81aa-c05fabcd2970}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

@@ -28,8 +28,14 @@ terms of the MIT license. A copy of the license can be found in the file
 #define MI_SEGMENT_MAP_PART_SIZE      (MI_INTPTR_SIZE*MI_KiB - 128)      // 128 > sizeof(mi_memid_t) ! 
 #define MI_SEGMENT_MAP_PART_BITS      (8*MI_SEGMENT_MAP_PART_SIZE)
 #define MI_SEGMENT_MAP_PART_ENTRIES   (MI_SEGMENT_MAP_PART_SIZE / MI_INTPTR_SIZE)
-#define MI_SEGMENT_MAP_PART_BIT_SPAN  (MI_SEGMENT_ALIGN)
+#define MI_SEGMENT_MAP_PART_BIT_SPAN  (MI_SEGMENT_ALIGN)                 // memory area covered by 1 bit
+
+#if (MI_SEGMENT_MAP_PART_BITS < (MI_SEGMENT_MAP_MAX_ADDRESS / MI_SEGMENT_MAP_PART_BIT_SPAN)) // prevent overflow on 32-bit (issue #1017)
 #define MI_SEGMENT_MAP_PART_SPAN      (MI_SEGMENT_MAP_PART_BITS * MI_SEGMENT_MAP_PART_BIT_SPAN)
+#else
+#define MI_SEGMENT_MAP_PART_SPAN      MI_SEGMENT_MAP_MAX_ADDRESS
+#endif
+
 #define MI_SEGMENT_MAP_MAX_PARTS      ((MI_SEGMENT_MAP_MAX_ADDRESS / MI_SEGMENT_MAP_PART_SPAN) + 1)
 
 // A part of the segment map.
@@ -52,14 +58,15 @@ static mi_segmap_part_t* mi_segment_map_index_of(const mi_segment_t* segment, bo
   mi_segmap_part_t* part = mi_atomic_load_ptr_relaxed(mi_segmap_part_t, &mi_segment_map[segindex]);
 
   // allocate on demand to reduce .bss footprint
-  if (part == NULL) {
+  if mi_unlikely(part == NULL) {
     if (!create_on_demand) return NULL;
     mi_memid_t memid;
-    part = (mi_segmap_part_t*)_mi_os_alloc(sizeof(mi_segmap_part_t), &memid, NULL);
+    part = (mi_segmap_part_t*)_mi_os_zalloc(sizeof(mi_segmap_part_t), &memid);
     if (part == NULL) return NULL;
+    part->memid = memid;
     mi_segmap_part_t* expected = NULL;
     if (!mi_atomic_cas_ptr_strong_release(mi_segmap_part_t, &mi_segment_map[segindex], &expected, part)) {
-      _mi_os_free(part, sizeof(mi_segmap_part_t), memid, NULL);
+      _mi_os_free(part, sizeof(mi_segmap_part_t), memid);
       part = expected;
       if (part == NULL) return NULL;
     }
@@ -123,4 +130,13 @@ static bool mi_is_valid_pointer(const void* p) {
 
 mi_decl_nodiscard mi_decl_export bool mi_is_in_heap_region(const void* p) mi_attr_noexcept {
   return mi_is_valid_pointer(p);
+}
+
+void _mi_segment_map_unsafe_destroy(void) {
+  for (size_t i = 0; i < MI_SEGMENT_MAP_MAX_PARTS; i++) {
+    mi_segmap_part_t* part = mi_atomic_exchange_ptr_relaxed(mi_segmap_part_t, &mi_segment_map[i], NULL);
+    if (part != NULL) {
+      _mi_os_free(part, sizeof(mi_segmap_part_t), part->memid);
+    }
+  }
 }
