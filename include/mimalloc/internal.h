@@ -177,7 +177,7 @@ void*       _mi_os_alloc_aligned(size_t size, size_t alignment, bool commit, boo
 void*       _mi_os_alloc_aligned_at_offset(size_t size, size_t alignment, size_t align_offset, bool commit, bool allow_large, mi_memid_t* memid);
 
 void*       _mi_os_get_aligned_hint(size_t try_alignment, size_t size);
-bool        _mi_os_use_large_page(size_t size, size_t alignment);
+bool        _mi_os_canuse_large_page(size_t size, size_t alignment);
 size_t      _mi_os_large_page_size(void);
 void*       _mi_os_alloc_huge_os_pages(size_t pages, int numa_node, mi_msecs_t max_secs, size_t* pages_reserved, size_t* psize, mi_memid_t* memid);
 
@@ -256,9 +256,9 @@ void        _mi_deferred_free(mi_heap_t* heap, bool force);
 void        _mi_page_free_collect(mi_page_t* page,bool force);
 void        _mi_page_reclaim(mi_heap_t* heap, mi_page_t* page);   // callback from segments
 
-size_t      _mi_page_bin(const mi_page_t* page); // for stats
-size_t      _mi_bin_size(size_t bin);            // for stats
-size_t      _mi_bin(size_t size);                // for stats
+size_t      _mi_page_stats_bin(const mi_page_t* page); // for stats
+size_t      _mi_bin_size(size_t bin);                  // for stats
+size_t      _mi_bin(size_t size);                      // for stats
 
 // "heap.c"
 void        _mi_heap_init(mi_heap_t* heap, mi_tld_t* tld, mi_arena_id_t arena_id, bool noreclaim, uint8_t tag);
@@ -1010,7 +1010,7 @@ static inline size_t mi_popcount(size_t x) {
 extern mi_decl_hidden bool _mi_cpu_has_fsrm;
 extern mi_decl_hidden bool _mi_cpu_has_erms;
 static inline void _mi_memcpy(void* dst, const void* src, size_t n) {
-  if ((_mi_cpu_has_fsrm && n <= 128) || (_mi_cpu_has_erms && n > 128)) {
+  if (_mi_cpu_has_fsrm && n <= 127) { // || (_mi_cpu_has_erms && n > 128)) {
     __movsb((unsigned char*)dst, (const unsigned char*)src, n);
   }
   else {
@@ -1018,7 +1018,7 @@ static inline void _mi_memcpy(void* dst, const void* src, size_t n) {
   }
 }
 static inline void _mi_memzero(void* dst, size_t n) {
-  if ((_mi_cpu_has_fsrm && n <= 128) || (_mi_cpu_has_erms && n > 128)) {
+  if (_mi_cpu_has_fsrm && n <= 127) { // || (_mi_cpu_has_erms && n > 128)) {
     __stosb((unsigned char*)dst, 0, n);
   }
   else {
