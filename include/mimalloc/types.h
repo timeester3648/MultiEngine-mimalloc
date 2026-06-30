@@ -53,10 +53,11 @@ terms of the MIT license. A copy of the license can be found in the file
 // #define MI_STAT 1
 
 // Define MI_SECURE to enable security mitigations
-// #define MI_SECURE 1  // guard page around metadata
-// #define MI_SECURE 2  // guard page around each mimalloc page
+// #define MI_SECURE 1  // guard pages around meta data, randomize arena allocation addresses (like ASLR), abort on detected meta data corruption
+// #define MI_SECURE 2  // randomize relative allocation addresses (within mimalloc pages)
 // #define MI_SECURE 3  // encode free lists (detect corrupted free list (buffer overflow), and invalid pointer free)
-// #define MI_SECURE 4  // checks for double free. (may be more expensive)
+// #define MI_SECURE 4  // checks for double free (may be more expensive) (`-DMI_SECURE=ON`)
+// #define MI_SECURE 5  // guard page at the end of each mimalloc page (expensive!) (`-DMI_SECURE_FULL=ON`)
 
 #if !defined(MI_SECURE)
 #define MI_SECURE 0
@@ -74,11 +75,9 @@ terms of the MIT license. A copy of the license can be found in the file
 #endif
 #endif
 
-// Use guard pages behind objects of a certain size (set by the MIMALLOC_DEBUG_GUARDED_MIN/MAX options)
-// Padding should be disabled when using guard pages
-// #define MI_GUARDED 1
-#if defined(MI_GUARDED)
-#define MI_PADDING  0
+// Enable guard pages behind objects of a certain size (set by the MIMALLOC_GUARDED_MIN/MAX/SAMPLE_RATE options)
+#if !defined(MI_GUARDED) && MI_DEBUG
+#define MI_GUARDED  1
 #endif
 
 // Reserve extra padding at the end of each block to be more resilient against heap block overflows.
@@ -504,6 +503,7 @@ struct mi_heap_s {
   size_t                page_count;                          // total number of pages in the `pages` queues.
   size_t                page_retired_min;                    // smallest retired index (retired pages are fully free, but still in the page queues)
   size_t                page_retired_max;                    // largest retired index into the `pages` array.
+  size_t                pages_full_size;                     // optimization: total size of blocks in the pages of the full queue (issue #1220)
   long                  generic_count;                       // how often is `_mi_malloc_generic` called?
   long                  generic_collect_count;               // how often is `_mi_malloc_generic` called without collecting?
   mi_heap_t*            next;                                // list of heaps per thread

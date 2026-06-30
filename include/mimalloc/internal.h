@@ -109,7 +109,8 @@ void        _mi_strlcpy(char* dest, const char* src, size_t dest_size);
 void        _mi_strlcat(char* dest, const char* src, size_t dest_size);
 size_t      _mi_strlen(const char* s);
 size_t      _mi_strnlen(const char* s, size_t max_len);
-bool        _mi_getenv(const char* name, char* result, size_t result_size);
+bool        _mi_streq(const char* s, const char* t);
+int         _mi_getenv(const char* name, char* result, size_t result_size);
 
 // "options.c"
 void        _mi_fputs(mi_output_fun* out, void* arg, const char* prefix, const char* message);
@@ -317,6 +318,9 @@ bool        _mi_page_is_valid(mi_page_t* page);
 #ifndef EOVERFLOW      // count*size overflow
 #define EOVERFLOW (75)
 #endif
+#ifndef ENOENT         // environment variable not found
+#define ENOENT (2)
+#endif
 
 
 // ------------------------------------------------------
@@ -349,7 +353,7 @@ mi_decl_noreturn mi_decl_cold void _mi_assert_fail(const char* assertion, const 
   Inlined definitions
 ----------------------------------------------------------- */
 #define MI_UNUSED(x)     (void)(x)
-#if (MI_DEBUG>0)
+#if (MI_DEBUG>1)
 #define MI_UNUSED_RELEASE(x)
 #else
 #define MI_UNUSED_RELEASE(x)  MI_UNUSED(x)
@@ -375,8 +379,7 @@ static inline bool _mi_is_power_of_two(uintptr_t x) {
 
 // Is a pointer aligned?
 static inline bool _mi_is_aligned(void* p, size_t alignment) {
-  mi_assert_internal(alignment != 0);
-  return (((uintptr_t)p % alignment) == 0);
+  return (alignment==0 || ((uintptr_t)p % alignment) == 0);
 }
 
 // Align upwards
@@ -393,7 +396,7 @@ static inline uintptr_t _mi_align_up(uintptr_t sz, size_t alignment) {
 
 
 // Align a pointer upwards
-static inline void* mi_align_up_ptr(void* p, size_t alignment) {
+static inline void* _mi_align_up_ptr(const void* p, size_t alignment) {
   return (void*)_mi_align_up((uintptr_t)p, alignment);
 }
 
@@ -652,6 +655,13 @@ static inline bool mi_page_is_in_full(const mi_page_t* page) {
 }
 
 static inline void mi_page_set_in_full(mi_page_t* page, bool in_full) {
+  if (page->flags.x.in_full != in_full) {
+    // optimize: maintain pages_full_size to avoid visiting the full queue (issue #1220)
+    mi_heap_t* const heap = mi_page_heap(page);
+    const size_t size = page->capacity * mi_page_block_size(page);
+    if (in_full) { heap->pages_full_size += size; }
+            else { mi_assert_internal(size <= heap->pages_full_size); heap->pages_full_size -= size; }
+  }
   page->flags.x.in_full = in_full;
 }
 
@@ -666,12 +676,17 @@ static inline void mi_page_set_has_aligned(mi_page_t* page, bool has_aligned) {
 /* -------------------------------------------------------------------
   Guarded objects
 ------------------------------------------------------------------- */
-#if MI_GUARDED
 static inline bool mi_block_ptr_is_guarded(const mi_block_t* block, const void* p) {
+#if MI_GUARDED
   const ptrdiff_t offset = (uint8_t*)p - (uint8_t*)block;
   return (offset >= (ptrdiff_t)(sizeof(mi_block_t)) && block->next == MI_BLOCK_TAG_GUARDED);
+#else
+  MI_UNUSED(block); MI_UNUSED(p);
+  return false;
+#endif
 }
 
+#if MI_GUARDED
 static inline bool mi_heap_malloc_use_guarded(mi_heap_t* heap, size_t size) {
   // this code is written to result in fast assembly as it is on the hot path for allocation
   const size_t count = heap->guarded_sample_count - 1;  // if the rate was 0, this will underflow and count for a long time..

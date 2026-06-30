@@ -174,6 +174,14 @@ static boolean_t intro_zone_locked(malloc_zone_t* zone) {
   return false;
 }
 
+// Required whenever the zone advertises version >= 9: macOS calls this from the
+// atfork_child handler (_malloc_fork_child) without a NULL check. mimalloc keeps
+// no zone-level locks that need reinitializing after fork, so a no-op is safe.
+// Leaving it NULL makes the forked child jump to address 0 and crash in fork().
+static void intro_reinit_lock(malloc_zone_t* zone) {
+  MI_UNUSED(zone);
+}
+
 
 /* ------------------------------------------------------
   At process start, override the default allocator
@@ -198,6 +206,7 @@ static malloc_introspection_t mi_introspect = {
 #if defined(MAC_OS_X_VERSION_10_6) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6) && !defined(__ppc__)
   .statistics = &intro_statistics,
   .zone_locked = &intro_zone_locked,
+  .reinit_lock = &intro_reinit_lock,
 #endif
 };
 
@@ -253,11 +262,8 @@ static malloc_zone_t mi_malloc_zone = {
 // `malloc_zone_calloc` etc. see <https://github.com/aosm/libmalloc/blob/master/man/malloc_zone_malloc.3>
 // ------------------------------------------------------
 
-static inline malloc_zone_t* mi_get_default_zone(void)
-{
-  static bool init;
-  if mi_unlikely(!init) {
-    init = true;
+static inline malloc_zone_t* mi_get_default_zone(void) {
+  mi_atomic_do_once {
     malloc_zone_register(&mi_malloc_zone);  // by calling register we avoid a zone error on free (see <http://eatmyrandom.blogspot.com/2010/03/mallocfree-interception-on-mac-os-x.html>)
   }
   return &mi_malloc_zone;
@@ -328,7 +334,7 @@ static bool zone_check(malloc_zone_t* zone) {
 
 static malloc_zone_t* zone_from_ptr(const void* p) {
   MI_UNUSED(p);
-  return mi_get_default_zone();
+  return (mi_is_in_heap_region(p) ? mi_get_default_zone() : NULL);
 }
 
 static void zone_log(malloc_zone_t* zone, void* p) {

@@ -106,7 +106,9 @@ void _mi_prim_out_stderr( const char* msg );
 
 // Get an environment variable. (only for options)
 // name != NULL, result != NULL, result_size >= 64
-bool _mi_prim_getenv(const char* name, char* result, size_t result_size);
+// Return 1 for success, 0 if not found,
+// and -1 on error (for example, if `getenv` cannot be called yet during preloading).
+int _mi_prim_getenv(const char* name, char* result, size_t result_size);
 
 
 // Fill a buffer with strong randomness; return `false` on error or if
@@ -257,14 +259,16 @@ static inline void mi_prim_tls_slot_set(size_t slot, void* value) mi_attr_noexce
 // but unfortunately, it seems we cannot test for this reliably at this time (see issue #883)
 // Nevertheless, it seems needed on older graviton platforms (see issue #851).
 // For now, we only enable this for specific platforms.
-#if !defined(__APPLE__)  /* on apple (M1) the wrong register is read (tpidr_el0 instead of tpidrro_el0) so fall back to TLS slot assembly (<https://github.com/microsoft/mimalloc/issues/343#issuecomment-763272369>)*/ \
-    && !defined(__CYGWIN__) \
-    && !defined(MI_LIBC_MUSL) \
-    && (!defined(__clang_major__) || __clang_major__ >= 14)  /* older clang versions emit bad code; fall back to using the TLS slot (<https://lore.kernel.org/linux-arm-kernel/202110280952.352F66D8@keescook/T/>) */
-  #if    (defined(__GNUC__) && (__GNUC__ >= 7)  && defined(__aarch64__)) /* aarch64 for older gcc versions (issue #851) */ \
-      || (defined(__GNUC__) && (__GNUC__ >= 11) && defined(__x86_64__)) \
-      || (defined(__clang_major__) && (__clang_major__ >= 14) && (defined(__aarch64__) || defined(__x86_64__)))
-    #define MI_USE_BUILTIN_THREAD_POINTER  1
+#if !defined(MI_USE_BUILTIN_THREAD_POINTER)   /* allow user override */
+  #if !defined(__APPLE__)  /* on apple (M1) the wrong register is read (tpidr_el0 instead of tpidrro_el0) so fall back to TLS slot assembly (<https://github.com/microsoft/mimalloc/issues/343#issuecomment-763272369>)*/ \
+      && !defined(__CYGWIN__) \
+      && !defined(MI_LIBC_MUSL) \
+      && (!defined(__clang_major__) || __clang_major__ >= 14)  /* older clang versions emit bad code; fall back to using the TLS slot (<https://lore.kernel.org/linux-arm-kernel/202110280952.352F66D8@keescook/T/>) */
+    #if    (defined(__GNUC__) && (__GNUC__ >= 7)  && defined(__aarch64__)) /* aarch64 for older gcc versions (issue #851) */ \
+        || (defined(__GNUC__) && (__GNUC__ >= 11) && defined(__x86_64__)) \
+        || (defined(__clang_major__) && (__clang_major__ >= 14) && (defined(__aarch64__) || defined(__x86_64__)))
+      #define MI_USE_BUILTIN_THREAD_POINTER  1
+    #endif
   #endif
 #endif
 
@@ -280,7 +284,9 @@ static inline mi_threadid_t _mi_prim_thread_id(void) mi_attr_noexcept;
 #if defined(MI_PRIM_THREAD_ID)
 
 static inline mi_threadid_t _mi_prim_thread_id(void) mi_attr_noexcept {
-  return MI_PRIM_THREAD_ID();  // used for example by CPython for a free threaded build (see python/cpython#115488)
+  const mi_threadid_t tid = MI_PRIM_THREAD_ID();  // used for example by CPython for a free threaded build (see python/cpython#115488)
+  mi_assert_internal( (tid & 0x03) == 0 );        // mimalloc reserves the bottom 2 bits
+  return tid;
 }
 
 #elif defined(_WIN32)
