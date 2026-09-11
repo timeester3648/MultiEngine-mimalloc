@@ -211,11 +211,6 @@ static inline uintptr_t mi_atomic_exchange_explicit(_Atomic(uintptr_t)*p, uintpt
   (void)(mo);
   return (uintptr_t)MI_MSC_64(_InterlockedExchange)((volatile msc_intptr_t*)p, (msc_intptr_t)exchange);
 }
-static inline void mi_atomic_thread_fence(mi_memory_order mo) {
-  (void)(mo);
-  _Atomic(uintptr_t) x = 0;
-  mi_atomic_exchange_explicit(&x, 1, mo);
-}
 
 static inline uintptr_t mi_atomic_load_explicit(_Atomic(uintptr_t) const* p, mi_memory_order mo) {
   (void)(mo);
@@ -226,9 +221,11 @@ static inline uintptr_t mi_atomic_load_explicit(_Atomic(uintptr_t) const* p, mi_
     if (mo == mi_memory_order_relaxed) {
       return (uintptr_t)MI_MSC_XX(__iso_volatile_load)((volatile const intptr_t*)p);
     }
+    #if !defined(__clang__) // work around __ldar missing in clang-cl, see https://github.com/llvm/llvm-project/issues/121689
     else if (mo <= mi_memory_order_acquire) {
       return MI_MSC_XX(__ldar)((volatile const uintptr_t*)p);
     }
+    #endif
     else {
       const uintptr_t u = (uintptr_t)MI_MSC_XX(__iso_volatile_load)((volatile const intptr_t*)p);
       __dmb(15);  // _ARM(64)_BARRIER_SY
@@ -248,9 +245,11 @@ static inline void mi_atomic_store_explicit(_Atomic(uintptr_t)*p, uintptr_t x, m
     if (mo == mi_memory_order_relaxed) {
       MI_MSC_XX(__iso_volatile_store)((volatile intptr_t*)p, x);
     }
+    #if !defined(__clang__) // work around __stlr missing in clang-cl, see https://github.com/llvm/llvm-project/issues/121689
     else if (mo <= mi_memory_order_release) {
       MI_MSC_XX(__stlr)((volatile uintptr_t*)p,x);
     }
+    #endif
     else {
       mi_atomic_exchange_explicit(p, x, mo);
     }
@@ -268,7 +267,7 @@ static inline int64_t mi_atomic_loadi64_explicit(_Atomic(int64_t)*p, mi_memory_o
     if (mo == mi_memory_order_relaxed) {
       return __iso_volatile_load64((volatile const int64_t*)p);
     }
-    #if defined(_M_ARM64)
+    #if defined(_M_ARM64) && !defined(__clang__) // work around __ldar64 missing in clang-cl, see https://github.com/llvm/llvm-project/issues/121689
     else if (mo <= mi_memory_order_acquire) {
       return __ldar64((volatile const uintptr_t*)p);
     }
@@ -293,7 +292,7 @@ static inline void mi_atomic_storei64_explicit(_Atomic(int64_t)*p, int64_t x, mi
     if (mo == mi_memory_order_relaxed) {
       __iso_volatile_store64((volatile int64_t*)p,x);
     }
-    #if defined(_M_ARM64)
+    #if defined(_M_ARM64) && !defined(__clang__) // work around __stlr64 missing in clang-cl, see https://github.com/llvm/llvm-project/issues/121689
     else if (mo == mi_memory_order_release) {
       __stlr64((volatile uint64_t*)p, (uint64_t)x);
     }
@@ -330,18 +329,18 @@ static inline void mi_atomic_void_addi64_relaxed(volatile int64_t* p, const vola
   }
 }
 
-static inline void mi_atomic_maxi64_relaxed(volatile _Atomic(int64_t)*p, int64_t x) {
+static inline void mi_atomic_maxi64_relaxed(volatile _Atomic(int64_t)* p, int64_t x) {
   int64_t current;
   do {
     current = *p;
   } while (current < x && _InterlockedCompareExchange64(p, x, current) != current);
 }
 
-static inline void mi_atomic_addi64_acq_rel(volatile _Atomic(int64_t*)p, int64_t i) {
+static inline void mi_atomic_addi64_acq_rel(volatile _Atomic(int64_t)* p, int64_t i) {
   mi_atomic_addi64_relaxed(p, i);
 }
 
-static inline bool mi_atomic_casi64_strong_acq_rel(volatile _Atomic(int64_t*)p, int64_t* exp, int64_t des) {
+static inline bool mi_atomic_casi64_strong_acq_rel(volatile _Atomic(int64_t)* p, int64_t* exp, int64_t des) {
   const int64_t read = _InterlockedCompareExchange64(p, des, *exp);
   if (read == *exp) {
     return true;
@@ -416,7 +415,8 @@ static inline void mi_atomic_yield(void) {
 #elif (defined(__GNUC__) || defined(__clang__)) && \
       (defined(__x86_64__) || defined(__i386__) || \
        defined(__aarch64__) || defined(__arm__) || \
-       defined(__powerpc__) || defined(__ppc__) || defined(__PPC__) || defined(__POWERPC__))
+       defined(__powerpc__) || defined(__ppc__) || defined(__PPC__) || defined(__POWERPC__) || \
+       defined(__riscv))
 #if defined(__x86_64__) || defined(__i386__)
 static inline void mi_atomic_yield(void) {
   __asm__ volatile ("pause" ::: "memory");
@@ -443,6 +443,16 @@ static inline void mi_atomic_yield(void) {
 #else
 static inline void mi_atomic_yield(void) {
   __asm__ __volatile__ ("or 27,27,27" ::: "memory");
+}
+#endif
+#elif defined(__riscv)
+#if defined(__riscv_zihintpause)
+static inline void mi_atomic_yield(void) {
+  __asm__ volatile("pause" ::: "memory");
+}
+#else
+static inline void mi_atomic_yield(void) {
+  __asm__ volatile("nop" ::: "memory");
 }
 #endif
 #endif

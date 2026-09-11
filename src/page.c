@@ -204,7 +204,7 @@ static void _mi_page_thread_free_collect(mi_page_t* page)
   }
   // if `count > max_count` there was a memory corruption (possibly infinite list due to double multi-threaded free)
   if mi_unlikely(count > max_count) {
-    _mi_error_message(EFAULT, "corrupted thread-free list\n");
+    _mi_error_message(EFAULT, "corrupted thread-free list (possibly due to a cross-thread double free)\n");
     return; // the thread-free items cannot be freed
   }
   // if `count > page->used` there was another kind memory corruption (either in the page meta-data or in the linked list)
@@ -297,8 +297,8 @@ static mi_page_t* mi_page_fresh_alloc(mi_heap_t* heap, mi_page_queue_t* pq, size
   const size_t full_block_size = (pq == NULL || mi_page_is_huge(page) ? mi_page_block_size(page) : block_size); // see also: mi_segment_huge_page_alloc
   mi_assert_internal(full_block_size >= block_size);
   mi_page_init(heap, page, full_block_size, heap->tld);
-  mi_heap_stat_increase(heap, pages, 1);
-  mi_heap_stat_increase(heap, page_bins[_mi_page_stats_bin(page)], 1);
+  _mi_stat_increase(&heap->tld->stats.pages, 1);
+  _mi_stat_increase(&heap->tld->stats.page_bins[_mi_page_stats_bin(page)], 1);
   if (pq != NULL) { mi_page_queue_push(heap, pq, page); }
   mi_assert_expensive(_mi_page_is_valid(page));
   return page;
@@ -457,7 +457,6 @@ void _mi_page_free(mi_page_t* page, mi_page_queue_t* pq, bool force) {
   _mi_segment_page_free(page, force, segments_tld);
 }
 
-#define MI_MAX_RETIRE_SIZE    MI_LARGE_OBJ_SIZE_MAX   // should be less than size for MI_BIN_HUGE
 #define MI_RETIRE_CYCLES      (16)
 
 // Retire a page with no more used blocks
@@ -542,7 +541,7 @@ void _mi_heap_collect_retired(mi_heap_t* heap, bool force) {
 
 static void mi_page_free_list_extend_secure(mi_heap_t* const heap, mi_page_t* const page, const size_t bsize, const size_t extend, mi_stats_t* const stats) {
   MI_UNUSED(stats);
-  #if (MI_SECURE<=2)
+  #if (MI_SECURE < 2)
   mi_assert_internal(page->free == NULL);
   mi_assert_internal(page->local_free == NULL);
   #endif
@@ -600,7 +599,7 @@ static void mi_page_free_list_extend_secure(mi_heap_t* const heap, mi_page_t* co
 static mi_decl_noinline void mi_page_free_list_extend( mi_page_t* const page, const size_t bsize, const size_t extend, mi_stats_t* const stats)
 {
   MI_UNUSED(stats);
-  #if (MI_SECURE <= 2)
+  #if (MI_SECURE < 2)
   mi_assert_internal(page->free == NULL);
   mi_assert_internal(page->local_free == NULL);
   #endif
@@ -641,7 +640,7 @@ static mi_decl_noinline void mi_page_free_list_extend( mi_page_t* const page, co
 // extra test in malloc? or cache effects?)
 static bool mi_page_extend_free(mi_heap_t* heap, mi_page_t* page, mi_tld_t* tld) {
   mi_assert_expensive(mi_page_is_valid_init(page));
-  #if (MI_SECURE<=2)
+  #if (MI_SECURE < 2)
   mi_assert(page->free == NULL);
   mi_assert(page->local_free == NULL);
   if (page->free != NULL) return true;
@@ -680,7 +679,7 @@ static bool mi_page_extend_free(mi_heap_t* heap, mi_page_t* page, mi_tld_t* tld)
   }
   // enable the new free list
   page->capacity += (uint16_t)extend;
-  mi_stat_increase(tld->stats.page_committed, extend * bsize);
+  _mi_stat_increase(&tld->stats.page_committed, extend * bsize);
   mi_assert_expensive(mi_page_is_valid_init(page));
   return true;
 }
@@ -979,7 +978,7 @@ static mi_page_t* mi_find_page(mi_heap_t* heap, size_t size, size_t huge_alignme
 // Note: in debug mode the size includes MI_PADDING_SIZE and might have overflowed.
 // The `huge_alignment` is normally 0 but is set to a multiple of MI_SLICE_SIZE for
 // very large requested alignments in which case we use a huge singleton page.
-void* _mi_malloc_generic(mi_heap_t* heap, size_t size, bool zero, size_t huge_alignment, size_t* usable) mi_attr_noexcept
+void* _mi_malloc_generic(mi_heap_t* heap, size_t size, bool zero, size_t huge_alignment, mi_page_t** ppage) mi_attr_noexcept
 {
   mi_assert_internal(heap != NULL);
 
@@ -1025,7 +1024,7 @@ void* _mi_malloc_generic(mi_heap_t* heap, size_t size, bool zero, size_t huge_al
   mi_assert_internal(mi_page_block_size(page) >= size);
 
   // and try again, this time succeeding! (i.e. this should never recurse through _mi_page_malloc)
-  void* const p = _mi_page_malloc_zero(heap, page, size, zero, usable);
+  void* const p = _mi_page_malloc_zero(heap, page, size, zero, ppage);
   mi_assert_internal(p != NULL);
 
   // move singleton pages to the full queue
